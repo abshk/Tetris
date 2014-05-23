@@ -1,7 +1,18 @@
 Tetris
 ======
 
-A game of Tetris I developed using Java.
+A game of Tetris I developed using Java. This game takes input from mouse. 
+
+      Scroll Up (wheel): Block rotates anticlockwise.
+      Scroll Down (wheel): Block rotates clockwise.
+      Push Left button: Block moves left laterally.
+      Push Right button: Block moves right laterally.
+      Mouse cursor in the main rectangular gaming area: Game pauses.
+      Mouse cursor inside the falling block: Current block changes to Next block (displayed in the small rectangle on top right).
+      Horizontal lines disappear automatically once they are complete.
+      The game concludes when a block hits the top edge on the main gaming area.
+      Quit button can be used to exit the game.
+
 
 
 At the start, the program will ask for four parameter values before the game starts in standard input (console).
