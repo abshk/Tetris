@@ -1,0 +1,875 @@
+
+
+//package tetris3;
+
+import java.awt.*;
+import java.awt.event.MouseEvent;
+import java.awt.event.MouseWheelEvent;
+import java.awt.event.MouseListener;
+import java.awt.event.MouseMotionListener;
+import java.awt.event.MouseWheelListener;
+import java.awt.event.WindowAdapter;
+import java.awt.event.WindowEvent;
+import java.util.logging.Level;
+import java.util.logging.Logger;
+import javax.swing.*;
+import java.io.*;
+
+public class Tetris3 extends JFrame {
+
+    static Tetris3 game; // The basic Frame object reference which hold the game.
+    public boolean gameOn = true; // 'true' value indicates that the game is On.
+
+    Tetris3() {
+        super("Tetris");
+        addWindowListener(new WindowAdapter() {
+
+            public void windowClosing(WindowEvent e) {
+                System.exit(0);
+            }
+        });
+    }
+
+    public static void main(String[] args) throws IOException {
+        game = new Tetris3(); // The frame object used.
+        game.start();
+    }
+
+    // The entire game starts and concludes in this method
+    public void start() throws IOException {
+        Tetris3.GameCanvas can = new Tetris3.GameCanvas(); // The canvas object
+        game.getContentPane().add(can);
+        
+        can.addMouseListener(can); // 'can' listens to all three types of mouse manipulations on 'can' itself.
+        can.addMouseMotionListener(can);
+        can.addMouseWheelListener(can);
+                
+        // Inputting Game parameters via console
+        inputParameters(can);
+        
+        game.setSize(700, 700);
+        game.setVisible(true);
+        
+        // This slows down the game. Executes only when game has not completed (gameOn flag), and cursor is out of main area (mainAreaFlag).
+        while(gameOn){
+            while(can.mainAreaFlag){
+                if(can.changeOfShape){can.repaint();}
+            }
+            try {
+                Thread.sleep((long)(400/can.fallSpeed)); // range of sleep duration varies from 367 - 200 millisecs for level = 1 and S = 0.1 - 1.0
+                //System.out.println(""+(long)(400/can.fallSpeed));
+            } catch (InterruptedException ex) {
+                Logger.getLogger(Tetris3.class.getName()).log(Level.SEVERE, null, ex);
+            }
+            can.repaint();
+            while(can.mainAreaFlag){
+                if(can.changeOfShape){can.repaint();}
+            }
+        }
+    }
+    
+    void inputParameters(GameCanvas can) throws IOException{
+        BufferedReader inp = new BufferedReader(new InputStreamReader(System.in));
+        
+        System.out.print("(1 of 4) Please enter the Scoring Factor in the range 1-10 (Recommended: 1): ");
+        can.M = Integer.parseInt(inp.readLine());
+        while(can.M<1 || can.M >10){
+            System.out.println();
+            System.out.print("Input is out of range. Please try again: ");
+            can.M = Integer.parseInt(inp.readLine());
+        }
+        System.out.println("-------------------------");
+        
+        System.out.print("(2 of 4) Please enter the number of rows for each level, in the range 20-50 (Recommended: 20): ");
+        can.N = Integer.parseInt(inp.readLine());
+        while(can.N<20 || can.N >50){
+            System.out.println();
+            System.out.print("Input is out of range. Please try again: ");
+            can.N = Integer.parseInt(inp.readLine());
+        }
+        System.out.println("-------------------------");
+        
+        System.out.print("(3 of 4) Please enter the Speed Factor, in the range 0.1-1.0 (Recommended: 0.4): ");
+        can.S = Float.parseFloat(inp.readLine());
+        while(can.S<0.1f || can.S >1.0f){
+            System.out.println();
+            System.out.print("Input is out of range. Please try again: ");
+            can.S = Float.parseFloat(inp.readLine());
+        }
+        can.fallSpeed = can.fallSpeed*(1+can.level*can.S);
+        System.out.println("-------------------------");
+        
+        System.out.println("(4 of 4) Please enter the size of a unit(either 2 or 4 or 8, Recommended: 4).");
+        System.out.print("This value will also determine the width and height of the main gaming area: ");
+        can.unitSize = Integer.parseInt(inp.readLine());
+        
+        while(can.unitSize!=2 && can.unitSize!=4 && can.unitSize!=8){
+            System.out.println();
+            System.out.print("Input is an invalid value. Please enter either 2 or 4 or 8: ");
+            can.unitSize = Integer.parseInt(inp.readLine());
+        }
+        can.lMain = 40/can.unitSize;
+        can.hMain = 80/can.unitSize;
+        can.permBlockPos = new boolean[can.lMain][can.hMain]; // Initializing array for perm Block
+        can.permBlockColors = new Color[can.lMain][can.hMain]; // Initializing array for perm Block colors
+    }
+    
+    // Inner class - The canvas that has everything painted on to it, andalso listens for all mouse manipulations.
+    class GameCanvas extends Canvas implements MouseListener, MouseMotionListener, MouseWheelListener {
+        
+        public int xMaxPix, yMaxPix; // No. of pixels in canvas
+        public float xMaxLog = 100.0F; // Logical x-coordinate limit
+        public float yMaxLog = 100.0F; // Logical y-coordinate limit
+        public float makeIso; // Larger of the two units/pixel, helps create Isotropic canvas
+        // Two flags for creating PAUSE feature
+        public boolean mainAreaFlag = false;
+        public boolean pastStatusFlag = false;
+        // NEXT block variables
+        int nextBlockType = 0; // will vary between 1-7
+        // Current block variables
+        int currBlockType = 0; // will vary between 1-7
+        Color cl; // Color of the current block under movement.
+        int[][] currBlockPos = new int[4][2]; // Will have positions of all four blocks; [][0] - x, [][1] - y.
+        boolean motionOn = true;
+        // Permanent Blocks
+        boolean[][] permBlockPos; // Will have current status of main area, true - permanently occupied for the game.
+        Color[][] permBlockColors; // Colors of all permanent blocks
+        // Variable to used to identify the first paint call.
+        boolean firstPaint = true;
+        //Variable to identify Paused state
+        boolean pauseOn= false;
+        // Variable to ensure that left/right movements and downward movement don't happen at the same time.
+        boolean sideMoveOn = false; // True - Immediate left/right movement; mouse buttons have been clicked
+        // Variable to hold the axis of rotation of current block - This moves with the block
+        int[] rotAxis = new int[2];   // [0] - x coord., [1] - y coord.
+        // Variable to ensure that downward movemnet and rotation of current block don't happen together
+        boolean rotOn = false;
+        // The constants M,N,S
+        int M = 1; // scoring factor
+        int N = 2; // no. of required lines for level jump
+        float S = 0.1f; // speed factor
+        // Defining the game parameters
+        int score = 0; // Current score of the game
+        int lines = 0; // No of lines completed so far
+        int level = 1; // Current level of the game
+        public float fallSpeed = 1.0f; // Current falling speed
+        int unitSize = 4; // length of side of a unit (either 2 or 4 or 8)
+        int lMain = 10; // length/width of Main area (either 5 or 10 or 20)
+        int hMain = 20; // height of Main area (either 10 of 20 or 40)
+        
+        boolean insideCurr = false; // to check if the mouse is inside the current block
+        boolean wasInsideCurr = false; // to check if the mouse was inside the current block before the current movement
+        boolean changeOfShape = false; // temp variable, turns to true for a single iteration - leads to change of shape, and then gets back to false.
+        
+        
+        
+        // The paint method. This creates and recreates everything on canvas.
+        public void paint(Graphics g){
+            // calculation of makeIso so that aspect-ratio remains constant.
+            Dimension d = getSize();
+            xMaxPix = d.width-1;
+            yMaxPix = d.height-1;
+            makeIso = Math.max(xMaxLog/xMaxPix, yMaxLog/yMaxPix);
+            
+            // Case - Only for the first paint
+            if(firstPaint){
+                currBlockType = (int)(Math.random()*8);
+                startCurrBlock(g);
+                nextBlockType = (int)(Math.random()*8);
+                motionOn = true;               
+                firstPaint = false;
+            }
+           
+            // Case - When the current block strikes bottom or another block
+            if(motionOn==false){
+            currBlockType = nextBlockType;
+            if(checkStart()==true){
+                startCurrBlock(g);
+                nextBlockType = (int)(Math.random()*8);
+            }
+            motionOn = true;
+            }
+            
+            // Code common to all cases - for all repaints
+            createStaticElements(g); // create all elements on canvas that remain unchanged for all repaint calls.
+            drawNextBlock(g);
+            drawPermBlocks(g);
+            drawCurrBlock(g);
+            // Current block has either touched bottom or a permanent block
+            if(checkNextMove()==false){
+                motionOn = false;
+                for(int i=0;i<4;i++){
+                        permBlockPos[currBlockPos[i][0]][currBlockPos[i][1]] = true; // convert current block to permanent one.
+                        permBlockColors[currBlockPos[i][0]][currBlockPos[i][1]] = cl; // save the color.
+                }
+                checkCompletedLine();
+            }
+            // It can move futher down.
+            else{
+                if(!sideMoveOn && !rotOn && !changeOfShape){ // SideMoveOn ensures that either left/right or downward move happens, they should not happen simultaneously. Same for rotOn - for rotation 
+                    for(int i=0;i<4;i++){
+                    currBlockPos[i][1]++;
+                    }
+                    rotAxis[1]++;
+                }
+                sideMoveOn = false; // This paves the way for dowanward movement in next iteration.
+                rotOn = false; // This paves the way for dowanward movement in next iteration.
+            } // End of common code
+            
+            // Case - when the mouse has just entered the current block - the current block would be replaced by Next block.
+            if(changeOfShape){
+                currBlockType = nextBlockType;
+                swapCurrBlock(g);
+                nextBlockType = (int)(Math.random()*8);
+                changeOfShape = false; // so that further continuance of mouse inside current block does not lead to further replacements, until it moves out once at least.
+            }
+            
+            // Case - When the game is over (This is in addition to the common code - for the last repaint)
+            if(checkStart()==false){
+                g.setColor(Color.red);
+                g.drawString("GAME OVER",iX(60),iY(62));
+                g.setColor(Color.black);
+                gameOn = false; // Thus, the game is over. You will need to close the program and start again.
+            }
+            // Mouse cursor is inside the main area.
+            if (mainAreaFlag==true){
+                g.setColor(Color.blue);
+                g.drawString("PAUSE", iX(27), iY(49));
+                g.drawRect(iX(24),iY(52),iX(12),iX(5));
+                g.setColor(Color.black);
+            }
+        }
+        
+        // Check the permBlockPos for completed lines and delete them
+        public void checkCompletedLine(){
+            boolean flag = true; // This flag is used to indicate if the current line is complete. (true - complete)
+            for(int j=(hMain-1);j>-1;j--){
+                for(int i=0;i<lMain;i++){
+                    if(!permBlockPos[i][j]){
+                        //System.out.println(i+", "+j);
+                        flag = false;
+                        break;
+                    }
+                    //System.out.println("Line: "+j);
+                }
+                //delete the line (i) and move the above permanent blocks down
+                if(flag){
+                    for(int k=j-1;k>-1;k--){
+                        for(int l=0;l<lMain;l++){
+                            permBlockPos[l][k+1] = permBlockPos[l][k];
+                            permBlockColors[l][k+1] = permBlockColors[l][k];
+                        }
+                    }
+                    j++; // So that the current line remains the same(in next iteration. This happens only when a line is deleted.)
+                    lines++; // Incerementing no. of completed lines.
+                    score = score + (level*M); // Incrementing score upon completion of a line.
+                    if((lines%N)==0){ // when no. of completed lines touches N.
+                        level++; // incrementing level
+                        fallSpeed = fallSpeed*(1+level*S); // incrementing falling speed
+                    }
+                }
+                flag = true;
+            }
+        }
+        
+        // Creates all elements on the canvas that won't change as game proceeds.
+        public void createStaticElements(Graphics g){
+            // Rectangle for Main Area
+            g.drawLine(iX(10),iY(90),iX(50),iY(90));
+            g.drawLine(iX(50),iY(90),iX(50),iY(10));
+            g.drawLine(iX(50),iY(10),iX(10),iY(10));
+            g.drawLine(iX(10),iY(10),iX(10),iY(90));
+            // Rectangle for NEXT area
+            g.drawLine(iX(60),iY(90),iX(92),iY(90));
+            g.drawLine(iX(92),iY(90),iX(92),iY(74));
+            g.drawLine(iX(92),iY(74),iX(60),iY(74));
+            g.drawLine(iX(60),iY(74),iX(60),iY(90));
+            // Rectangle for Exit area
+            g.drawLine(iX(60),iY(20),iX(80),iY(20));
+            g.drawLine(iX(80),iY(20),iX(80),iY(10));
+            g.drawLine(iX(80),iY(10),iX(60),iY(10));
+            g.drawLine(iX(60),iY(10),iX(60),iY(20));
+            // Static Text on screen
+            g.drawString("QUIT",iX(68),iY(14));
+            g.drawString("Level: "+level,iX(60),iY(50));
+            g.drawString("Lines: "+lines,iX(60),iY(42));
+            g.drawString("Score: "+score,iX(60),iY(34));
+        }
+        
+        // This starts/begins the current block and assigns it the required attributes.
+        public void startCurrBlock(Graphics g){
+
+            if(currBlockType==1 || currBlockType==0){
+                cl=Color.yellow;
+                currBlockPos[2][0] = (lMain-1)/2; currBlockPos[2][1] = 0;
+                currBlockPos[3][0] = (lMain+1)/2; currBlockPos[3][1] = 0;
+                currBlockPos[0][0] = (lMain-3)/2; currBlockPos[0][1] = 1;
+                currBlockPos[1][0] = (lMain-1)/2; currBlockPos[1][1] = 1;
+                rotAxis[0] = (lMain-1)/2; rotAxis[1] = 1;
+            }
+            else if(currBlockType==2){
+                cl=Color.gray;
+                currBlockPos[2][0] = (lMain-3)/2; currBlockPos[2][1] = 0;
+                currBlockPos[3][0] = (lMain-1)/2; currBlockPos[3][1] = 0;
+                currBlockPos[0][0] = (lMain-1)/2; currBlockPos[0][1] = 1;
+                currBlockPos[1][0] = (lMain+1)/2; currBlockPos[1][1] = 1;
+                rotAxis[0] = (lMain-1)/2; rotAxis[1] = 1;
+            }
+            else if(currBlockType==3){
+                cl=Color.blue;
+                currBlockPos[0][0] = (lMain-3)/2; currBlockPos[0][1] = 1;
+                currBlockPos[1][0] = (lMain-1)/2; currBlockPos[1][1] = 1;
+                currBlockPos[2][0] = (lMain+1)/2; currBlockPos[2][1] = 1;
+                currBlockPos[3][0] = (lMain-3)/2; currBlockPos[3][1] = 0;
+                rotAxis[0] = (lMain-1)/2; rotAxis[1] = 1;
+            }
+            else if(currBlockType==4){
+                cl=Color.red;
+                currBlockPos[0][0] = (lMain-3)/2; currBlockPos[0][1] = 1;
+                currBlockPos[1][0] = (lMain-1)/2; currBlockPos[1][1] = 1;
+                currBlockPos[2][0] = (lMain+1)/2; currBlockPos[2][1] = 1;
+                currBlockPos[3][0] = (lMain+1)/2; currBlockPos[3][1] = 0;
+                rotAxis[0] = (lMain+1)/2; rotAxis[1] = 1;
+            }
+            else if(currBlockType==5){
+                cl=Color.green;
+                currBlockPos[0][0] = (lMain-3)/2; currBlockPos[0][1] = 1;
+                currBlockPos[1][0] = (lMain-1)/2; currBlockPos[1][1] = 1;
+                currBlockPos[2][0] = (lMain-3)/2; currBlockPos[2][1] = 0;
+                currBlockPos[3][0] = (lMain-1)/2; currBlockPos[3][1] = 0;
+                rotAxis[0] = (lMain-1)/2; rotAxis[1] = 1;
+            }
+            else if(currBlockType==6){
+                cl=Color.orange;
+                currBlockPos[0][0] = (lMain-3)/2; currBlockPos[0][1] = 1;
+                currBlockPos[1][0] = (lMain-1)/2; currBlockPos[1][1] = 1;
+                currBlockPos[2][0] = (lMain+1)/2; currBlockPos[2][1] = 1;
+                currBlockPos[3][0] = (lMain-1)/2; currBlockPos[3][1] = 0;
+                rotAxis[0] = (lMain-1)/2; rotAxis[1] = 1;
+            }
+            else if(currBlockType==7){
+                cl=Color.cyan;
+                currBlockPos[0][0] = (lMain-3)/2; currBlockPos[0][1] = 1;
+                currBlockPos[1][0] = (lMain-1)/2; currBlockPos[1][1] = 1;
+                currBlockPos[2][0] = (lMain+1)/2; currBlockPos[2][1] = 1;
+                currBlockPos[3][0] = (lMain+3)/2; currBlockPos[3][1] = 1;
+                rotAxis[0] = (lMain+1)/2; rotAxis[1] = 1;
+            }
+        }
+        
+        // Swaps the current block with the next type
+        public void swapCurrBlock(Graphics g){
+            // These booleans are used to store info abt possible movement in rotAxis and later undo them, if reqd.
+            boolean check1 = false; 
+            boolean check2 = false;
+            boolean check3 = false;
+            boolean check4 = false;
+            boolean check5 = false;
+            //System.out.println(""+rotAxis[0]+", "+rotAxis[1]);
+            if(currBlockType==1 || currBlockType==0){
+                // To ensure that the new currBlock doesnt go out of bounds of Main area or intrude Permanent blocks.
+                if(rotAxis[0]-1<0){rotAxis[0]++;check1 = true;} // rotAxis is moved accordingly
+                if(rotAxis[0]+1>(lMain-1)){rotAxis[0]--;check2 = true;}
+                if(rotAxis[1]-1<0){rotAxis[1]++;check3 = true;}
+                if(permBlockPos[rotAxis[0]][rotAxis[1]-1]){restoreRotAxis(check1,check2,check3,check4,check5);return;} // Swapping is denied.
+                if(permBlockPos[rotAxis[0]+1][rotAxis[1]-1]){restoreRotAxis(check1,check2,check3,check4,check5);return;}
+                if(permBlockPos[rotAxis[0]-1][rotAxis[1]]){restoreRotAxis(check1,check2,check3,check4,check5);return;}
+                if(permBlockPos[rotAxis[0]][rotAxis[1]]){restoreRotAxis(check1,check2,check3,check4,check5);return;}
+                
+                
+                cl=Color.yellow;
+                currBlockPos[2][0] = rotAxis[0]; currBlockPos[2][1] = rotAxis[1]-1;
+                currBlockPos[3][0] = rotAxis[0]+1; currBlockPos[3][1] = rotAxis[1]-1;
+                currBlockPos[0][0] = rotAxis[0]-1; currBlockPos[0][1] = rotAxis[1];
+                currBlockPos[1][0] = rotAxis[0]; currBlockPos[1][1] = rotAxis[1];
+            }
+            else if(currBlockType==2){
+                if(rotAxis[0]-1<0){rotAxis[0]++;check1 = true;} // rotAxis is moved accordingly
+                if(rotAxis[0]+1>(lMain-1)){rotAxis[0]--;check2 = true;}
+                if(rotAxis[1]-1<0){rotAxis[1]++;check3 = true;}
+                if(permBlockPos[rotAxis[0]-1][rotAxis[1]-1]){restoreRotAxis(check1,check2,check3,check4,check5);return;}
+                if(permBlockPos[rotAxis[0]][rotAxis[1]-1]){restoreRotAxis(check1,check2,check3,check4,check5);return;}
+                if(permBlockPos[rotAxis[0]][rotAxis[1]]){restoreRotAxis(check1,check2,check3,check4,check5);return;}
+                if(permBlockPos[rotAxis[0]+1][rotAxis[1]]){restoreRotAxis(check1,check2,check3,check4,check5);return;}
+                
+                
+                cl=Color.gray;
+                currBlockPos[2][0] = rotAxis[0]-1; currBlockPos[2][1] = rotAxis[1]-1;
+                currBlockPos[3][0] = rotAxis[0]; currBlockPos[3][1] = rotAxis[1]-1;
+                currBlockPos[0][0] = rotAxis[0]; currBlockPos[0][1] = rotAxis[1];
+                currBlockPos[1][0] = rotAxis[0]+1; currBlockPos[1][1] = rotAxis[1];
+            }
+            else if(currBlockType==3){
+                if(rotAxis[0]-1<0){rotAxis[0]++;check1 = true;} // rotAxis is moved accordingly
+                if(rotAxis[0]+1>(lMain-1)){rotAxis[0]--;check2 = true;}
+                if(rotAxis[1]-1<0){rotAxis[1]++;check3 = true;}
+                if(permBlockPos[rotAxis[0]-1][rotAxis[1]]){restoreRotAxis(check1,check2,check3,check4,check5);return;}
+                if(permBlockPos[rotAxis[0]][rotAxis[1]]){restoreRotAxis(check1,check2,check3,check4,check5);return;}
+                if(permBlockPos[rotAxis[0]+1][rotAxis[1]]){restoreRotAxis(check1,check2,check3,check4,check5);return;}
+                if(permBlockPos[rotAxis[0]-1][rotAxis[1]-1]){restoreRotAxis(check1,check2,check3,check4,check5);return;}
+                
+                
+                cl=Color.blue;
+                currBlockPos[0][0] = rotAxis[0]-1; currBlockPos[0][1] = rotAxis[1];
+                currBlockPos[1][0] = rotAxis[0]; currBlockPos[1][1] = rotAxis[1];
+                currBlockPos[2][0] = rotAxis[0]+1; currBlockPos[2][1] = rotAxis[1];
+                currBlockPos[3][0] = rotAxis[0]-1; currBlockPos[3][1] = rotAxis[1]-1;
+            }
+            else if(currBlockType==4){
+                if(rotAxis[0]-2==-2){rotAxis[0]=rotAxis[0]+2;check4 = true;} // rotAxis is moved accordingly
+                if(rotAxis[0]-2==-1){rotAxis[0]++;check5 = true;} 
+                if(rotAxis[1]-1<0){rotAxis[1]++;check3 = true;}
+                if(permBlockPos[rotAxis[0]-2][rotAxis[1]]){restoreRotAxis(check1,check2,check3,check4,check5);return;}
+                if(permBlockPos[rotAxis[0]-1][rotAxis[1]]){restoreRotAxis(check1,check2,check3,check4,check5);return;}
+                if(permBlockPos[rotAxis[0]][rotAxis[1]]){restoreRotAxis(check1,check2,check3,check4,check5);return;}
+                if(permBlockPos[rotAxis[0]][rotAxis[1]-1]){restoreRotAxis(check1,check2,check3,check4,check5);return;}
+                
+                
+                cl=Color.red;
+                currBlockPos[0][0] = rotAxis[0]-2; currBlockPos[0][1] = rotAxis[1];
+                currBlockPos[1][0] = rotAxis[0]-1; currBlockPos[1][1] = rotAxis[1];
+                currBlockPos[2][0] = rotAxis[0]; currBlockPos[2][1] = rotAxis[1];
+                currBlockPos[3][0] = rotAxis[0]; currBlockPos[3][1] = rotAxis[1]-1;
+            }
+            else if(currBlockType==5){
+                if(rotAxis[0]-1<0){rotAxis[0]++;check1 = true;} // rotAxis is moved accordingly
+                if(rotAxis[1]-1<0){rotAxis[1]++;check3 = true;}
+                if(permBlockPos[rotAxis[0]-1][rotAxis[1]]){restoreRotAxis(check1,check2,check3,check4,check5);return;}
+                if(permBlockPos[rotAxis[0]][rotAxis[1]]){restoreRotAxis(check1,check2,check3,check4,check5);return;}
+                if(permBlockPos[rotAxis[0]-1][rotAxis[1]-1]){restoreRotAxis(check1,check2,check3,check4,check5);return;}
+                if(permBlockPos[rotAxis[0]][rotAxis[1]-1]){restoreRotAxis(check1,check2,check3,check4,check5);return;}
+                
+                
+                cl=Color.green;
+                currBlockPos[0][0] = rotAxis[0]-1; currBlockPos[0][1] = rotAxis[1];
+                currBlockPos[1][0] = rotAxis[0]; currBlockPos[1][1] = rotAxis[1];
+                currBlockPos[2][0] = rotAxis[0]-1; currBlockPos[2][1] = rotAxis[1]-1;
+                currBlockPos[3][0] = rotAxis[0]; currBlockPos[3][1] = rotAxis[1]-1;
+            }
+            else if(currBlockType==6){
+                if(rotAxis[0]-1<0){rotAxis[0]++;check1 = true;} // rotAxis is moved accordingly
+                if(rotAxis[0]+1>(lMain-1)){rotAxis[0]--;check2 = true;}
+                if(rotAxis[1]-1<0){rotAxis[1]++;check3 = true;}
+                if(permBlockPos[rotAxis[0]-1][rotAxis[1]]){restoreRotAxis(check1,check2,check3,check4,check5);return;}
+                if(permBlockPos[rotAxis[0]][rotAxis[1]]){restoreRotAxis(check1,check2,check3,check4,check5);return;}
+                if(permBlockPos[rotAxis[0]+1][rotAxis[1]]){restoreRotAxis(check1,check2,check3,check4,check5);return;}
+                if(permBlockPos[rotAxis[0]][rotAxis[1]-1]){restoreRotAxis(check1,check2,check3,check4,check5);return;}                
+                
+                
+                cl=Color.orange;
+                currBlockPos[0][0] = rotAxis[0]-1; currBlockPos[0][1] = rotAxis[1];
+                currBlockPos[1][0] = rotAxis[0]; currBlockPos[1][1] = rotAxis[1];
+                currBlockPos[2][0] = rotAxis[0]+1; currBlockPos[2][1] = rotAxis[1];
+                currBlockPos[3][0] = rotAxis[0]; currBlockPos[3][1] = rotAxis[1]-1;
+            }
+            else if(currBlockType==7){
+                if(rotAxis[0]-2==-2){rotAxis[0]=rotAxis[0]+2;check4 = true;} // rotAxis is moved accordingly
+                if(rotAxis[0]-2==-1){rotAxis[0]++;check5 = true;} 
+                if(rotAxis[0]+1>(lMain-1)){rotAxis[0]--;check2 = true;}
+                if(permBlockPos[rotAxis[0]-2][rotAxis[1]]){restoreRotAxis(check1,check2,check3,check4,check5);return;}
+                if(permBlockPos[rotAxis[0]-1][rotAxis[1]]){restoreRotAxis(check1,check2,check3,check4,check5);return;}
+                if(permBlockPos[rotAxis[0]][rotAxis[1]]){restoreRotAxis(check1,check2,check3,check4,check5);return;}
+                if(permBlockPos[rotAxis[0]+1][rotAxis[1]]){restoreRotAxis(check1,check2,check3,check4,check5);return;}
+                
+                
+                cl=Color.cyan;
+                currBlockPos[0][0] = rotAxis[0]-2; currBlockPos[0][1] = rotAxis[1];
+                currBlockPos[1][0] = rotAxis[0]-1; currBlockPos[1][1] = rotAxis[1];
+                currBlockPos[2][0] = rotAxis[0]; currBlockPos[2][1] = rotAxis[1];
+                currBlockPos[3][0] = rotAxis[0]+1; currBlockPos[3][1] = rotAxis[1];
+            }
+        }
+        
+        // Restores rotAxis, if swap fails
+        void restoreRotAxis(boolean check1,boolean check2,boolean check3,boolean check4,boolean check5){
+            if(check1){rotAxis[0]--;}
+            if(check2){rotAxis[0]++;}
+            if(check3){rotAxis[1]--;}
+            if(check4){rotAxis[0] = rotAxis[0]-2;}
+            if(check5){rotAxis[0]--;}
+        }
+        
+        // Draws the current block in each iteration.
+        public void drawCurrBlock(Graphics g){
+            for(int i=0;i<4;i++){
+                drawUnit(10+unitSize*(currBlockPos[i][0]),90-unitSize*(currBlockPos[i][1]),cl,g);
+            }
+        }
+        
+        // Checks if the current block move one unit down
+        public boolean checkNextMove(){
+            if((currBlockPos[0][1]+1>(hMain-1)) || ((currBlockPos[1][1]+1>(hMain-1))) || ((currBlockPos[2][1]+1>(hMain-1))) || ((currBlockPos[3][1]+1>(hMain-1)))){
+                return false;
+            }
+            else{
+               for(int i=0;i<4;i++){
+                if (permBlockPos[currBlockPos[i][0]][currBlockPos[i][1]+1]==true){
+                    return false;
+                }
+             }
+           }
+            return true;  
+        }
+        
+        // checks if the current block can move one unit left
+        public boolean checkLeft(){
+            for(int i=0;i<4;i++){
+                if(currBlockPos[i][0]-1<0 || permBlockPos[currBlockPos[i][0]-1][currBlockPos[i][1]]){
+                    return false;
+                }
+            }
+            return true;
+        }
+        
+        // checks if the current block can move one unit right
+        public boolean checkRight(){
+            for(int i=0;i<4;i++){
+                if(currBlockPos[i][0]+1>(lMain-1) || permBlockPos[currBlockPos[i][0]+1][currBlockPos[i][1]]){
+                    return false;
+                }
+            }
+            return true;
+        }
+        
+        // Draws the next block to appear, in the NEXT rectangle
+        public void drawNextBlock(Graphics g){
+           // nextBlockType = (int)(Math.random()*8);  // Randomly generating next block type
+            if(nextBlockType==1 || nextBlockType==0){
+                drawUnit(76-(2*unitSize),82,Color.yellow,g);
+                drawUnit(76-unitSize,82,Color.yellow,g);
+                drawUnit(76-unitSize,82+unitSize,Color.yellow,g); 
+                drawUnit(76,82+unitSize,Color.yellow,g); 
+            }
+            else if(nextBlockType==2){
+                drawUnit(76-unitSize,82,Color.gray,g); 
+                drawUnit(76,82,Color.gray,g); 
+                drawUnit(76-(2*unitSize),82+unitSize,Color.gray,g); 
+                drawUnit(76-unitSize,82+unitSize,Color.gray,g); 
+            }
+            else if(nextBlockType==3){
+                drawUnit(76-(2*unitSize),82,Color.blue,g); 
+                drawUnit(76-unitSize,82,Color.blue,g); 
+                drawUnit(76,82,Color.blue,g); 
+                drawUnit(76-(2*unitSize),82+unitSize,Color.blue,g); 
+            }
+            else if(nextBlockType==4){
+                drawUnit(76-(2*unitSize),82,Color.red,g); 
+                drawUnit(76-unitSize,82,Color.red,g); 
+                drawUnit(76,82,Color.red,g); 
+                drawUnit(76,82+unitSize,Color.red,g); 
+            }
+            else if(nextBlockType==5){
+                drawUnit(76-(2*unitSize),82,Color.green,g); 
+                drawUnit(76-unitSize,82,Color.green,g); 
+                drawUnit(76-(2*unitSize),82+unitSize,Color.green,g); 
+                drawUnit(76-unitSize,82+unitSize,Color.green,g); 
+            }
+            else if(nextBlockType==6){
+                drawUnit(76-(2*unitSize),82,Color.orange,g); 
+                drawUnit(76-unitSize,82,Color.orange,g); 
+                drawUnit(76,82,Color.orange,g); 
+                drawUnit(76-unitSize,82+unitSize,Color.orange,g); 
+            }
+            else if(nextBlockType==7){
+                drawUnit(76-(2*unitSize),82+unitSize,Color.cyan,g); 
+                drawUnit(76-unitSize,82+unitSize,Color.cyan,g); 
+                drawUnit(76,82+unitSize,Color.cyan,g); 
+                drawUnit(76+unitSize,82+unitSize,Color.cyan,g); 
+            }
+        }
+        
+        // Checks if the there is space for a new block to appear (for the game to continue).
+        public boolean checkStart(){
+            for(int i=(lMain-3)/2;i<(lMain+5)/2;i++){
+                for(int j=0;j<3;j++){
+                    if(permBlockPos[i][j]==true){
+                        return false;
+                    }
+                }
+            }
+            return true;
+        }
+        
+        // Draws all the permanent blocks.
+        public void drawPermBlocks(Graphics g){
+            for(int i=0;i<hMain;i++){
+                for(int j=0;j<lMain;j++){
+                    if(permBlockPos[j][i]){
+                        drawUnit(10+(unitSize*j),90-(unitSize*i),permBlockColors[j][i],g);
+                    }
+                }
+            }
+        }
+        
+        // Draws a single unit (position and color provided)
+        public void drawUnit(int x, int y, Color c, Graphics g){
+            //g.drawRect(iX(x),iY(y),iX(4)-1,iX(4)-1);
+            g.drawLine(iX(x),iY(y),iX(x+unitSize),iY(y));
+            g.drawLine(iX(x+unitSize),iY(y),iX(x+unitSize),iY(y-unitSize));
+            g.drawLine(iX(x+unitSize),iY(y-unitSize),iX(x),iY(y-unitSize));
+            g.drawLine(iX(x),iY(y-unitSize),iX(x),iY(y));
+            g.setColor(c);
+            g.fillRect(iX(x)+1,iY(y)+1,iX(x+unitSize)-iX(x)-1,iX(y)-iX(y-unitSize)-1);
+            g.setColor(Color.black);
+        }
+        
+        // Checks for validity and rotates(clockwise) a whole block
+        public void rotClock(){
+            for(int i=0;i<4;i++){
+                if(!unitCheckClock(currBlockPos[i])){
+                    return;
+                }
+            }
+            for(int i=0;i<4;i++){
+                currBlockPos[i] = unitClockRotated(currBlockPos[i],rotAxis);
+            }
+        }
+        
+        // Checks if a single unit can be rotated(clockwise)
+        public boolean unitCheckClock(int[] unit){
+            int newX = unitClockRotated(unit,rotAxis)[0];
+            int newY = unitClockRotated(unit,rotAxis)[1];
+            if(newX<0 || newX>(lMain-1) || newY>(hMain-1) || newY<0 || permBlockPos[newX][newY]==true){
+                return false;
+            }
+            return true;
+        }
+        
+        // Returns the new possible rotated position(clockwise) for a unit
+        public int[] unitClockRotated(int[] oldPos, int[] axis){
+            int[] newPos = new int[2];
+            float[] oldMidPoint = new float[2];
+            float[] newMidPoint = new float[2];
+            oldMidPoint[0] = oldPos[0] + 0.5f;
+            oldMidPoint[1] = oldPos[1] + 0.5f;
+            float x = oldMidPoint[0]-axis[0]; // x coord. of center point, relative to axis and Main-Area's coord system
+            float y = oldMidPoint[1]-axis[1]; // y coord. of center point, relative to axis and Main-Area's coord system
+            // Clockwise Rotation by 90 degrees
+            if(x>0 && y>0){
+                newMidPoint[0] = axis[0] - y;
+                newMidPoint[1] = axis[1] + x;
+            }
+            else if(x<0 && y>0){
+                newMidPoint[0] = axis[0] - y; 
+                newMidPoint[1] = axis[1] + x; // x is negative
+            }
+            else if(x<0 && y<0){
+                newMidPoint[0] = axis[0] - y; // y is negative
+                newMidPoint[1] = axis[1] + x; // x is negative
+            }
+            else if(x>0 && y<0){
+                newMidPoint[0] = axis[0] - y; // y is negative
+                newMidPoint[1] = axis[1] + x;
+            }
+            // Generating new corner (top left) from new mid-points
+            newPos[0] = (int)(newMidPoint[0] - 0.5f);
+            newPos[1] = (int)(newMidPoint[1] - 0.5f);
+            return newPos;
+        }
+        
+        // Checks for validity and rotates(anticlockwise) a whole block
+        public void rotAntiClock(){
+            for(int i=0;i<4;i++){
+                if(!unitCheckAntiClock(currBlockPos[i])){
+                    return;
+                }
+            }
+            for(int i=0;i<4;i++){
+                currBlockPos[i] = unitAntiClockRotated(currBlockPos[i],rotAxis);
+            }
+        }
+        
+        // Checks if a single unit can be rotated(anticlockwise)
+        public boolean unitCheckAntiClock(int[] unit){
+            int newX = unitAntiClockRotated(unit,rotAxis)[0];
+            int newY = unitAntiClockRotated(unit,rotAxis)[1];
+            if(newX<0 || newX>(lMain-1) || newY>(hMain-1) || newY<0 || permBlockPos[newX][newY]==true){
+                return false;
+            }
+            return true;
+        }
+        
+        // Returns the new possible rotated position(anticlockwise) for a unit
+        public int[] unitAntiClockRotated(int[] oldPos, int[] axis){
+            int[] newPos = new int[2];
+            float[] oldMidPoint = new float[2];
+            float[] newMidPoint = new float[2];
+            oldMidPoint[0] = oldPos[0] + 0.5f;
+            oldMidPoint[1] = oldPos[1] + 0.5f;
+            float x = oldMidPoint[0]-axis[0]; // x coord. of center point, relative to axis and Main-Area's coord system
+            float y = oldMidPoint[1]-axis[1]; // y coord. of center point, relative to axis and Main-Area's coord system
+            // AntiClockwise Rotation by 90 degrees
+            if(x>0 && y>0){
+                newMidPoint[0] = axis[0] + y;
+                newMidPoint[1] = axis[1] - x;
+            }
+            else if(x<0 && y>0){
+                newMidPoint[0] = axis[0] + y; 
+                newMidPoint[1] = axis[1] - x; // x is negative
+            }
+            else if(x<0 && y<0){
+                newMidPoint[0] = axis[0] + y; // y is negative
+                newMidPoint[1] = axis[1] - x; // x is negative
+            }
+            else if(x>0 && y<0){
+                newMidPoint[0] = axis[0] + y; // y is negative
+                newMidPoint[1] = axis[1] - x;
+            }
+            // Generating new corner (top left) from new mid-points
+            newPos[0] = (int)(newMidPoint[0] - 0.5f);
+            newPos[1] = (int)(newMidPoint[1] - 0.5f);
+            return newPos;
+        }
+        
+        public void checkInsideCurrent(float x, float y){
+            float currX;
+            float currY;
+            // Checking if the cursor is inside the currBlock
+            for(int i=0;i<4;i++){
+                currX = 10+(unitSize*currBlockPos[i][0]);
+                currY = 90-(unitSize*(currBlockPos[i][1]-1)); // -1 because the position of currBlock on screen would, most of the times, be of the previous repaint but the current block's numeric position would have actually advanced down. So we compensate by adding -1.
+                if((x>=currX)&&(x<=(currX+unitSize))&&(y>=(currY-unitSize))&&(y<=currY)){
+                    insideCurr = true;
+                    break;
+                }
+            }
+            
+            // This is for checking if the cursor has immediately moved from out of currBlock to inside it - Doesn't work when the cursor is inside but also was inside before this.
+           if(insideCurr && !wasInsideCurr){
+                        wasInsideCurr = true; // changed from false to true
+                        changeOfShape = true; // this changes to false right after the next repaint()(in the paint method)
+                        for(int i=0;i<4;i++){ // done to ensure that the currBlocks remain in place while transforming to Next.
+                            currBlockPos[i][1]--;
+                        }
+                        rotAxis[1]--; // done to ensure that the currBlocks remain in place while transforming to Next.
+                        score = score-(level*M);
+                    }
+           // This is for checking if the cursor has moved from inside to outside of currBlock. This and the previous if condition are never true for the same method call.
+           if(!insideCurr && wasInsideCurr){
+                        wasInsideCurr = false;
+                    }
+           insideCurr = false;
+        }
+        
+        // Conversion in-between device and logical coordinates
+        int iX(float x){return Math.round(x/makeIso);}
+        int iY(float y){return (yMaxPix - Math.round(y/makeIso));}
+        float fx(int x){return x*makeIso;}
+        float fy(int y){return (yMaxPix - y)*makeIso;}
+        
+        // Implementations of required methods (from listenet interfaces)
+        public void mouseClicked(MouseEvent evt) {
+            float x = fx(evt.getX());
+            float y = fy(evt.getY());
+            // Implementing EXIT button
+            if((x>=60)&&(x<=80)&&(y>=10)&&(y<=20)){
+                System.exit(0);
+            }
+            // Implementing left and right clicks - left/right movements
+            if(gameOn && !mainAreaFlag){
+                if(evt.getModifiers() == MouseEvent.BUTTON1_MASK){
+                    if(checkLeft()){
+                        for(int i=0;i<4;i++){
+                            currBlockPos[i][0]--;
+                        }
+                        rotAxis[0]--;
+                        sideMoveOn = true;
+                        repaint();
+                            // So that fast clicking of mouse doesn't accelerate the game.
+                           /* try {
+                                Thread.sleep(10);
+                            } catch (InterruptedException ex) {
+                                Logger.getLogger(Tetris2.class.getName()).log(Level.SEVERE, null, ex);
+                            }*/
+                    }
+                    else{
+                        //do nothing - Stay at same place
+                    }
+                }
+                if(evt.getModifiers() == MouseEvent.BUTTON3_MASK){
+                    if(checkRight()){
+                        for(int i=0;i<4;i++){
+                            currBlockPos[i][0]++;
+                        }
+                        rotAxis[0]++;
+                        sideMoveOn = true;
+                        repaint();
+                        // So that fast clicking of mouse doesn't accelerate the game.
+                            /*try {
+                                Thread.sleep(10);
+                            } catch (InterruptedException ex) {
+                                Logger.getLogger(Tetris2.class.getName()).log(Level.SEVERE, null, ex);
+                            }*/
+                    }
+                    else{
+                        //do nothing - Stay at same place
+                    }
+                }
+            }
+        }
+
+        public void mouseEntered(MouseEvent evt) {
+        }
+
+        public void mouseExited(MouseEvent evt) {
+        }
+
+        public void mousePressed(MouseEvent evt) {
+        }
+
+        public void mouseReleased(MouseEvent evt) {
+        }
+        
+        public void mouseMoved(MouseEvent evt) {
+            if(gameOn){
+                float x = fx(evt.getX());
+                float y = fy(evt.getY());
+                if((x>=10)&&(x<=50)&&(y>=10)&&(y<=90)){
+                    if(pastStatusFlag==false){
+                    pastStatusFlag = true;
+                    mainAreaFlag = true;
+                    }
+                    // for changing currBlock to next if the mouse is inside currBlocks 
+                    checkInsideCurrent(x,y); 
+                }
+                else{
+                    if(pastStatusFlag==true){
+                        pastStatusFlag = false;
+                        mainAreaFlag = false;
+                    }
+                }
+            }
+        }
+        
+        public void mouseDragged(MouseEvent evt) {
+        }
+        
+        public void mouseWheelMoved(MouseWheelEvent evt){
+            if(gameOn && !mainAreaFlag){
+                if(evt.getWheelRotation()<0){ // Up scroll
+                    rotClock();
+                    rotOn = true;
+                    repaint();
+                    // So that fast scolling of mouse-wheel doesn't accelerate the game.
+                   /* try {
+                        Thread.sleep(20);
+                    } catch (InterruptedException ex) {
+                        Logger.getLogger(Tetris2.class.getName()).log(Level.SEVERE, null, ex);
+                    }*/
+                }
+                if(evt.getWheelRotation()>0){ // Down scroll
+                    rotAntiClock();
+                    rotOn = true;
+                    repaint();
+                    // So that fast scolling of mouse-wheel doesn't accelerate the game.
+                    /*try {
+                        Thread.sleep(20);
+                    } catch (InterruptedException ex) {
+                        Logger.getLogger(Testris2.class.getName()).log(Level.SEVERE, null, ex);
+                    }*/
+                }
+            }
+            
+        }
+    }
+}
